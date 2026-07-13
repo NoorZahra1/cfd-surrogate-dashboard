@@ -168,10 +168,12 @@ def get_geometry(case_name: str):
     tri = Delaunay(xy)
     kdt = cKDTree(xy)
     d_nn, _ = kdt.query(xy, k=2)
-    spacing = float(np.median(d_nn[:, 1]))
+    local_spacing = d_nn[:, 1]  # each point's own nearest-neighbor distance
+    spacing = float(np.median(local_spacing))
 
     return {
         "idx": idx, "xy": xy, "tri": tri, "kdt": kdt, "spacing": spacing,
+        "local_spacing": local_spacing,
         "n_full": n_full, "x_min": xy_full[:, 0].min(), "x_max": xy_full[:, 0].max(),
         "y_min": xy_full[:, 1].min(), "y_max": xy_full[:, 1].max(),
     }
@@ -186,12 +188,23 @@ def get_grid(case_name: str, resolution: int):
     return gx, gy, grid_x, grid_y
 
 
-def masked_interpolate(geo, values, grid_x, grid_y, hole_factor=2.5):
+def masked_interpolate(geo, values, grid_x, grid_y, hole_factor=3.0):
+    """
+    Interpolates scattered field data onto a regular grid, masking grid
+    points that fall in real gaps (e.g. inside a solid body, or outside the
+    mesh boundary). Uses each grid point's *local* nearest-neighbor spacing
+    (not a single global threshold) since mesh density varies a lot across
+    a domain — e.g. dense near a cylinder body, much sparser in the far
+    field. A global threshold falsely flags large chunks of the valid
+    sparse far-field as "holes" (and vice versa), producing a speckled,
+    confetti-like appearance instead of a clean field.
+    """
     interp = LinearNDInterpolator(geo["tri"], values)
     grid_z = interp(grid_x, grid_y)
     grid_pts = np.column_stack([grid_x.ravel(), grid_y.ravel()])
-    dist, _ = geo["kdt"].query(grid_pts)
-    mask = (dist > hole_factor * geo["spacing"]).reshape(grid_x.shape)
+    dist, nearest_idx = geo["kdt"].query(grid_pts)
+    local_thresh = hole_factor * geo["local_spacing"][nearest_idx]
+    mask = (dist > local_thresh).reshape(grid_x.shape)
     grid_z[mask] = np.nan
     return grid_z, mask
 
@@ -356,13 +369,13 @@ def make_contour(gx, gy, gz, title, colorscale):
             colorscale=colorscale,
             contours=dict(coloring="heatmap"),
             line=dict(width=0),
-            colorbar=dict(title=""),
+            colorbar=dict(title="", thickness=14, len=0.9),
         )
     )
     fig.update_layout(
-        title=title, xaxis_title="x", yaxis_title="y", height=400,
-        margin=dict(l=10, r=10, t=40, b=10),
-        yaxis=dict(scaleanchor="x", scaleratio=1),
+        title=dict(text=title, font=dict(size=14)),
+        xaxis_title="x", yaxis_title="y", height=360,
+        margin=dict(l=10, r=10, t=36, b=10),
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
