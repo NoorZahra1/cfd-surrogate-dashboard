@@ -751,11 +751,3 @@ def load_checkpoint(path: Path, device: str = "cpu") -> PODFCDNNTrainer:
     trainer.y_std = _get("y_std")
 
     return trainer
-
-
-
-
-
-
-
-
